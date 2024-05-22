@@ -36,31 +36,25 @@ def position_encoding(seqs):
 
 
 def data_construct(seqs, labels, train):
-    # Amino acid dictionary
-    '''
-    aa_dict = {'A': 1, 'R': 2, 'N': 3, 'D': 4, 'C': 5, 'Q': 6, 'E': 7, 'G': 8, 'H': 9, 'I': 10,
-                'L': 11, 'K': 12, 'M': 13, 'F': 14, 'P': 15, 'O': 16, 'S': 17, 'U': 18, 'T': 19,
-                'W': 20, 'Y': 21, 'V': 22, 'X': 23}
-    '''
-    # aa_dict = {'A': 1, 'C': 2, 'G': 3, 'T': 4}
+
     aa_dict = {'A': 1, 'C': 2, 'D': 3, 'E': 4, 'F': 5, 'G': 6, 'H': 7, 'I': 8, 'K': 9, 'L': 10,
                'M': 11, 'N': 12, 'P': 13, 'Q': 14, 'R': 15, 'S': 16, 'T': 17, 'V': 18, 'W': 19, 'Y': 20, 'X': 21}
 
     longest_num = len(max(seqs, key=len))
-    sequences = [i.ljust(longest_num, 'X') for i in seqs]    # 补长
-    pos_embed = position_encoding(sequences)     # 位置嵌入
-    HF_feature = HF_encoding(seqs, sequences)    # 传统特征
+    sequences = [i.ljust(longest_num, 'X') for i in seqs]
+    pos_embed = position_encoding(sequences)
+    HF_feature = HF_encoding(seqs, sequences)
 
     pep_codes = []
-    for pep in seqs:    # 读每个序列
+    for pep in seqs:
         current_pep = []
-        for aa in pep:    # 读每个残基
+        for aa in pep:
             current_pep.append(aa_dict[aa])
-        pep_codes.append(torch.tensor(current_pep))     # one-hot编码
+        pep_codes.append(torch.tensor(current_pep))
 
-    embed_data = rnn_utils.pad_sequence(pep_codes, batch_first=True)  # Fill the sequence to the same length
+    embed_data = rnn_utils.pad_sequence(pep_codes, batch_first=True)
 
-    dataset = Data.TensorDataset(embed_data, torch.FloatTensor(pos_embed),  # 封装one-hot+位置+传统+标签
+    dataset = Data.TensorDataset(embed_data, torch.FloatTensor(pos_embed),
                                  torch.FloatTensor(HF_feature), torch.LongTensor(labels))
     batch_size = 15
     data_iter = torch.utils.data.DataLoader(dataset, batch_size=batch_size, shuffle=train)
@@ -70,14 +64,13 @@ def data_construct(seqs, labels, train):
 
 def load_bench_data(file):
     tmp = pd.read_csv(file, header=None)
-    seqs, labels = tmp[0].values.tolist(), tmp[1].values.tolist()    # 数据已有标签
+    seqs, labels = tmp[0].values.tolist(), tmp[1].values.tolist()
     data_iter = data_construct(seqs, labels, train=True)
-    # data_iter = list(data_iter)
-    train_iter = [x for i, x in enumerate(data_iter) if i % 5 != 0]   # i是索引，x是内容
-    test_iter = [x for i, x in enumerate(data_iter) if i % 5 == 0]    # 5个里面有一个放验证集里，其余为训练数据，训练：测试=4：1
 
-    return train_iter, test_iter  # 含有部分特征表示
+    train_iter = [x for i, x in enumerate(data_iter) if i % 5 != 0]
+    test_iter = [x for i, x in enumerate(data_iter) if i % 5 == 0]
 
+    return train_iter, test_iter
 
 def load_ind_data(file):
     tmp = pd.read_csv(file, header=None)
@@ -87,7 +80,7 @@ def load_ind_data(file):
 
 
 class CrossAttention(nn.Module):
-    def __init__(self, in_dim1, in_dim2, k_dim=32, v_dim=32, num_heads=8):     # 32，32，4
+    def __init__(self, in_dim1, in_dim2, k_dim=32, v_dim=32, num_heads=8):
         super(CrossAttention, self).__init__()
         self.num_heads = num_heads
         self.k_dim = k_dim
@@ -127,11 +120,11 @@ class Net(nn.Module):
         self.embedding_seq = nn.Embedding(24, self.emb_dim, padding_idx=0)
         self.encoder_layer_seq = nn.TransformerEncoderLayer(d_model=self.emb_dim, nhead=8)
         self.transformer_encoder_seq = nn.TransformerEncoder(self.encoder_layer_seq, num_layers=1)
-        self.gru_seq = nn.GRU(4260, self.hidden_dim, num_layers=2, bidirectional=True, dropout=0.5)   #3160，3860，1900，2200
+        self.gru_seq = nn.GRU(input, self.hidden_dim, num_layers=2, bidirectional=True, dropout=0.5)
         self.cross_attention = CrossAttention(in_dim1=128, in_dim2=128)
 
         self.conv_cross = nn.Sequential(
-            nn.Conv1d(133, 64, kernel_size=3, stride=1, padding=0),  # 64\32\16(D3)
+            nn.Conv1d(num, 64, kernel_size=3, stride=1, padding=0),
             nn.BatchNorm1d(64),
             nn.Dropout(0.5),
             nn.ReLU(),
@@ -139,7 +132,7 @@ class Net(nn.Module):
         )
 
         self.block1 = nn.Sequential(nn.Flatten(),
-                                    nn.Linear(2688,512),    # 2688\672,512\256
+                                    nn.Linear(2688,512),
                                     nn.BatchNorm1d(512),
                                     nn.Dropout(0.6),
                                     nn.LeakyReLU(),
@@ -155,7 +148,7 @@ class Net(nn.Module):
 
     def forward(self, x, pos_embed, HF):
         output1 = self.embedding_seq(x) + pos_embed
-        output1 = self.transformer_encoder_seq(output1)  # .permute(1, 0, 2)
+        output1 = self.transformer_encoder_seq(output1)
 
         output2 = torch.unsqueeze(HF, dim=1)
         output2, hn = self.gru_seq(output2)
@@ -180,7 +173,6 @@ def evaluate(data_iter, net):
         pred_prob = pred_prob + pred_prob_positive.tolist()
         label_pred = label_pred + outputs.argmax(dim=1).tolist()
         label_real = label_real + y.tolist()
-        #rep_list.extend(rep.detach().numpy())
     performance, FPR, TPR, recall, precision = caculate_metric(pred_prob, label_pred, label_real)
     return performance, FPR, TPR, recall, precision
 
